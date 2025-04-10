@@ -9,7 +9,7 @@ public class BookingConfirmationFrame extends JFrame {
     private static final String USER = "root";
     private static final String PASSWORD = "";
 
-    public BookingConfirmationFrame(int userId, String film, String date, String time, String seats) {
+    public BookingConfirmationFrame(int userId, int suatChieuId, String seats) {
         if (userId <= 0) {
             JOptionPane.showMessageDialog(this, "Lỗi: Không xác định được người dùng!");
             return;
@@ -45,15 +45,23 @@ public class BookingConfirmationFrame extends JFrame {
             return;
         }
 
+        // Lấy thông tin suất chiếu từ CSDL
+        ShowtimeInfo showtime = getShowtimeInfo(suatChieuId);
+        if (showtime == null) {
+            JOptionPane.showMessageDialog(this, "Lỗi: Không tìm thấy thông tin suất chiếu!");
+            return;
+        }
+
         // Panel hiển thị thông tin vé
         JPanel ticketPanel = new JPanel();
-        ticketPanel.setLayout(new GridLayout(5, 1, 10, 10));
-        ticketPanel.setOpaque(false); // Để đồng nhất với backgroundPanel
+        ticketPanel.setLayout(new GridLayout(6, 1, 10, 10));
+        ticketPanel.setOpaque(false);
 
         ticketPanel.add(createLabel("Tên: " + name));
-        ticketPanel.add(createLabel("Phim: " + film));
-        ticketPanel.add(createLabel("Ngày: " + date));
-        ticketPanel.add(createLabel("Giờ: " + time));
+        ticketPanel.add(createLabel("Phim: " + showtime.filmName));
+        ticketPanel.add(createLabel("Ngày: " + showtime.date));
+        ticketPanel.add(createLabel("Giờ: " + showtime.time));
+        ticketPanel.add(createLabel("Phòng: " + showtime.room));
         ticketPanel.add(createLabel("Ghế: " + seats));
 
         backgroundPanel.add(ticketPanel, BorderLayout.CENTER);
@@ -78,7 +86,45 @@ public class BookingConfirmationFrame extends JFrame {
         setVisible(true);
     }
 
-    // Hàm lấy tên người dùng từ CSDL
+    // Class để lưu thông tin suất chiếu
+    private static class ShowtimeInfo {
+        String filmName;
+        String date;
+        String time;
+        String room;
+
+        ShowtimeInfo(String filmName, String date, String time, String room) {
+            this.filmName = filmName;
+            this.date = date;
+            this.time = time;
+            this.room = room;
+        }
+    }
+
+    // Hàm lấy thông tin suất chiếu từ bảng suat_chieu
+    private ShowtimeInfo getShowtimeInfo(int suatChieuId) {
+        String query = "SELECT p.ten_phim, sc.ngay_khoi_chieu, sc.thoi_gian_chieu, sc.ten_phong " +
+                       "FROM suat_chieu sc JOIN lich_chieu_phim p ON sc.phim_id = p.id WHERE sc.id = ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
+             PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setInt(1, suatChieuId);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                return new ShowtimeInfo(
+                        rs.getString("ten_phim"),
+                        rs.getString("ngay_khoi_chieu"),
+                        rs.getString("thoi_gian_chieu"),
+                        rs.getString("ten_phong")
+                );
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Lỗi truy vấn suất chiếu!");
+        }
+        return null;
+    }
+
+    // Hàm lấy tên người dùng từ bảng nguoi_dung
     private String getUserName(int userId) {
         try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD)) {
             String sql = "SELECT ho_ten FROM nguoi_dung WHERE id = ?";
@@ -95,7 +141,7 @@ public class BookingConfirmationFrame extends JFrame {
         return "";
     }
 
-    // Hàm tạo label chuẩn
+    // Hàm tạo label
     private JLabel createLabel(String text) {
         JLabel label = new JLabel(text);
         label.setFont(new Font("Arial", Font.PLAIN, 18));
@@ -103,7 +149,7 @@ public class BookingConfirmationFrame extends JFrame {
         return label;
     }
 
-    // Hàm style button
+    // Style button
     private void styleButton(JButton button, Color bgColor) {
         button.setBackground(bgColor);
         button.setForeground(Color.WHITE);

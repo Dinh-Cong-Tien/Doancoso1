@@ -3,21 +3,21 @@ package DOAN;
 import javax.swing.*;
 import java.awt.*;
 import java.sql.*;
-import java.util.Set;
+import java.util.Map;
 import MySQL.DatabaseConnection;
 
 public class PaymentFrame extends JFrame {
     private JFrame previousFrame;
     private int userId;
-    private int filmId;
-    private Set<String> selectedSeats;
+    private int suatChieuId;
+    private Map<String, Integer> selectedSeats;
     private double ticketPrice;
     private JLabel lblTotalPrice;
 
-    public PaymentFrame(JFrame previousFrame, int userId, int filmId, Set<String> selectedSeats) {
+    public PaymentFrame(JFrame previousFrame, int userId, int suatChieuId, Map<String, Integer> selectedSeats) {
         this.previousFrame = previousFrame;
         this.userId = userId;
-        this.filmId = filmId;
+        this.suatChieuId = suatChieuId;
         this.selectedSeats = selectedSeats;
 
         setTitle("Thanh Toán Online");
@@ -25,9 +25,8 @@ public class PaymentFrame extends JFrame {
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new BorderLayout());
-        getContentPane().setBackground(Color.WHITE); // Nền trắng
+        getContentPane().setBackground(Color.WHITE);
 
-        // ==== Phần thông tin thanh toán ====
         JPanel infoPanel = new JPanel(new GridLayout(3, 1, 10, 10));
         infoPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         infoPanel.setBackground(Color.WHITE);
@@ -36,7 +35,7 @@ public class PaymentFrame extends JFrame {
         lblTitle.setFont(new Font("Segoe UI", Font.BOLD, 20));
         lblTitle.setForeground(new Color(0x2E86C1));
 
-        JLabel lblSeats = new JLabel("Ghế đã chọn: " + String.join(", ", selectedSeats), SwingConstants.CENTER);
+        JLabel lblSeats = new JLabel("Ghế đã chọn: " + String.join(", ", selectedSeats.keySet()), SwingConstants.CENTER);
         lblSeats.setFont(new Font("Segoe UI", Font.PLAIN, 16));
 
         lblTotalPrice = new JLabel("Đang tải giá vé...", SwingConstants.CENTER);
@@ -48,7 +47,6 @@ public class PaymentFrame extends JFrame {
         infoPanel.add(lblTotalPrice);
         add(infoPanel, BorderLayout.NORTH);
 
-        // ==== Nút chọn phương thức thanh toán ====
         JPanel buttonPanel = new JPanel(new GridLayout(1, 3, 15, 0));
         buttonPanel.setBorder(BorderFactory.createEmptyBorder(30, 40, 30, 40));
         buttonPanel.setBackground(Color.WHITE);
@@ -70,7 +68,6 @@ public class PaymentFrame extends JFrame {
         fetchTicketPrice();
     }
 
-    // Hàm tạo button đẹp
     private JButton createStyledButton(String text, Color color) {
         JButton button = new JButton(text);
         button.setFocusPainted(false);
@@ -82,16 +79,11 @@ public class PaymentFrame extends JFrame {
     }
 
     private void fetchTicketPrice() {
-        String sql = """
-            SELECT sc.gia_ve
-            FROM suat_chieu sc
-            JOIN lich_chieu_phim lcp ON sc.phim_id = lcp.id
-            WHERE lcp.id = ?
-        """;
+        String sql = "SELECT gia_ve FROM suat_chieu WHERE id = ?";
 
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, filmId);
+            stmt.setInt(1, suatChieuId);
             ResultSet rs = stmt.executeQuery();
             if (rs.next()) {
                 ticketPrice = rs.getDouble("gia_ve");
@@ -116,16 +108,9 @@ public class PaymentFrame extends JFrame {
                 "Xác nhận Thanh Toán", JOptionPane.YES_NO_OPTION);
 
         if (response == JOptionPane.YES_OPTION) {
-            if (savePaymentToDatabase(method, totalAmount)) {
+            if (savePaymentToDatabase(method)) {
                 JOptionPane.showMessageDialog(this, "Thanh toán thành công qua " + method + "!");
-
-                String[] scheduleInfo = fetchScheduleInfo();
-                if (scheduleInfo != null) {
-                    String film = scheduleInfo[0];
-                    String date = scheduleInfo[1];
-                    String time = scheduleInfo[2];
-                    new BookingConfirmationFrame(userId, film, date, time, String.join(", ", selectedSeats));
-                }
+                new BookingConfirmationFrame(userId, suatChieuId, String.join(", ", selectedSeats.keySet()));
                 dispose();
             } else {
                 JOptionPane.showMessageDialog(this, "Thanh toán thất bại! Vui lòng thử lại.");
@@ -133,73 +118,66 @@ public class PaymentFrame extends JFrame {
         }
     }
 
-    private String[] fetchScheduleInfo() {
-        String sql = """
-            SELECT lcp.ten_phim, sc.ngay_khoi_chieu, sc.thoi_gian_chieu 
-            FROM lich_chieu_phim lcp
-            JOIN suat_chieu sc ON sc.phim_id = lcp.id
-            WHERE lcp.id = ?
-        """;
+    private boolean savePaymentToDatabase(String method) {
+        String getPhimIdSql = "SELECT phim_id, ve_con_lai FROM suat_chieu WHERE id = ?";
+        String insertVeSql = "INSERT INTO ve_xem_phim (id_lich_chieu, id_nguoi_dung, so_ghe, ngay_dat) VALUES (?, ?, ?, NOW())";
+        String insertPaymentSql = "INSERT INTO thanh_toan (id_ve_xem_phim, phuong_thuc, trang_thai, ngay_thanh_toan) VALUES (?, ?, ?, NOW())";
+        String updateSoVeSql = "UPDATE suat_chieu SET ve_con_lai = ve_con_lai - ? WHERE id = ?";
 
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, filmId);
-            ResultSet rs = stmt.executeQuery();
-            if (rs.next()) {
-                return new String[]{
-                        rs.getString("ten_phim"),
-                        rs.getString("ngay_khoi_chieu"),
-                        rs.getString("thoi_gian_chieu")
-                };
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-        return null;
-    }
+             PreparedStatement getPhimStmt = conn.prepareStatement(getPhimIdSql);
+             PreparedStatement insertVeStmt = conn.prepareStatement(insertVeSql, Statement.RETURN_GENERATED_KEYS);
+             PreparedStatement insertPayStmt = conn.prepareStatement(insertPaymentSql);
+             PreparedStatement updateVeStmt = conn.prepareStatement(updateSoVeSql)) {
 
-    private boolean savePaymentToDatabase(String method, double amount) {
-        String sql = "INSERT INTO thanh_toan (id_ve_xem_phim, phuong_thuc, trang_thai, ngay_thanh_toan) VALUES (?, ?, ?, NOW())";
-
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
             conn.setAutoCommit(false);
 
-            for (String seat : selectedSeats) {
-                int ticketId = saveTicketToDatabase(seat);
-                if (ticketId == -1) {
+            // Lấy id phim để gán vào id_lich_chieu (vì id_lich_chieu = phim_id)
+            getPhimStmt.setInt(1, suatChieuId);
+            ResultSet rs = getPhimStmt.executeQuery();
+            if (!rs.next()) {
+                conn.rollback();
+                return false;
+            }
+            int lichChieuId = rs.getInt("phim_id");
+            int veConLai = rs.getInt("ve_con_lai");
+
+            if (veConLai < selectedSeats.size()) {
+                JOptionPane.showMessageDialog(this, "Không đủ vé còn lại cho số lượng ghế đã chọn.");
+                conn.rollback();
+                return false;
+            }
+
+            for (String seat : selectedSeats.keySet()) {
+                // Lưu vé
+                insertVeStmt.setInt(1, lichChieuId);
+                insertVeStmt.setInt(2, userId);
+                insertVeStmt.setString(3, seat);
+                insertVeStmt.executeUpdate();
+                ResultSet rsVe = insertVeStmt.getGeneratedKeys();
+                if (!rsVe.next()) {
                     conn.rollback();
                     return false;
                 }
+                int veId = rsVe.getInt(1);
 
-                stmt.setInt(1, ticketId);
-                stmt.setString(2, method);
-                stmt.setString(3, "Đã Thanh Toán");
-                stmt.addBatch();
+                // Lưu thanh toán
+                insertPayStmt.setInt(1, veId);
+                insertPayStmt.setString(2, method);
+                insertPayStmt.setString(3, "Đã Thanh Toán");
+                insertPayStmt.executeUpdate();
             }
 
-            stmt.executeBatch();
+            // Cập nhật số vé còn lại
+            updateVeStmt.setInt(1, selectedSeats.size());
+            updateVeStmt.setInt(2, suatChieuId);
+            updateVeStmt.executeUpdate();
+
             conn.commit();
             return true;
         } catch (SQLException e) {
             e.printStackTrace();
         }
         return false;
-    }
-
-    private int saveTicketToDatabase(String seat) {
-        String sql = "INSERT INTO ve_xem_phim (id_nguoi_dung, id_lich_chieu, so_ghe, ngay_dat) VALUES (?, ?, ?, NOW())";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            stmt.setInt(1, userId);
-            stmt.setInt(2, filmId);
-            stmt.setString(3, seat);
-            stmt.executeUpdate();
-            ResultSet rs = stmt.getGeneratedKeys();
-            if (rs.next()) return rs.getInt(1);
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-        return -1;
     }
 }

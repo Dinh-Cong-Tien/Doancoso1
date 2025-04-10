@@ -5,6 +5,8 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
 import java.sql.*;
+import java.util.HashMap;
+
 import MySQL.*;
 
 public class ViewFilmsFrame extends JFrame {
@@ -120,37 +122,13 @@ public class ViewFilmsFrame extends JFrame {
         lblDescription.setEditable(false);
         lblDescription.setForeground(Color.WHITE);
 
-        // Truy vấn danh sách suất chiếu từ bảng "suat_chieu" (KHÔNG lấy thời gian)
-        JComboBox<String> dateComboBox = new JComboBox<>();
-        String query = "SELECT DISTINCT ngay_khoi_chieu, ten_phong, gia_ve " +
-                       "FROM suat_chieu WHERE phim_id = ? AND ve_con_lai > 0 ORDER BY ngay_khoi_chieu";
-
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(query)) {
-            stmt.setInt(1, filmId);
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                String showDate = rs.getString("ngay_khoi_chieu");
-                String room = rs.getString("ten_phong");
-                String price = rs.getBigDecimal("gia_ve") + " VNĐ";
-                dateComboBox.addItem(showDate + " (Phòng: " + room + ", Giá: " + price + ")");
-            }
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(this, "Lỗi tải suất chiếu: " + e.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
-        }
-
-        JPanel datePanel = new JPanel();
-        datePanel.setBackground(new Color(50, 50, 50));
-        datePanel.add(new JLabel("📅 Chọn ngày chiếu: "));
-        datePanel.add(dateComboBox);
-
-        // Nút đặt vé
+     // Nút đặt vé (mặc định lấy suất chiếu đầu tiên)
         JButton btnBook = createStyledButton("🎟 Đặt vé ngay", new Color(0, 180, 80), e -> {
-            String selectedDate = (String) dateComboBox.getSelectedItem();
-            if (selectedDate != null) {
-                openSeatSelection(filmId, selectedDate);
+            int suatChieuId = getFirstAvailableShowtime(filmId);
+            if (suatChieuId != -1) {
+                openSeatSelection(suatChieuId, title);
             } else {
-                JOptionPane.showMessageDialog(this, "Vui lòng chọn ngày chiếu!", "Thông báo", JOptionPane.WARNING_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Hiện tại chưa có suất chiếu khả dụng!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
             }
         });
         btnBook.setFont(new Font("SansSerif", Font.BOLD, 18));
@@ -159,23 +137,35 @@ public class ViewFilmsFrame extends JFrame {
         JButton btnBack = createStyledButton("⬅ Quay lại", new Color(200, 50, 50), e -> cardLayout.show(mainPanel, "FilmList"));
         btnBack.setFont(new Font("SansSerif", Font.BOLD, 16));
 
-        // Thêm khoảng cách giữa các thành phần
         infoPanel.add(lblTitle);
         infoPanel.add(Box.createVerticalStrut(10));
         infoPanel.add(lblDescription);
-        infoPanel.add(Box.createVerticalStrut(10));
-        infoPanel.add(datePanel);
-        infoPanel.add(Box.createVerticalStrut(15));
+        infoPanel.add(Box.createVerticalStrut(20));
         infoPanel.add(btnBook);
         infoPanel.add(Box.createVerticalStrut(15));
         infoPanel.add(btnBack);
 
-        // Đặt Layout chính
         detailsPanel.add(posterPanel, BorderLayout.WEST);
         detailsPanel.add(infoPanel, BorderLayout.CENTER);
 
         cardLayout.show(mainPanel, "FilmDetails");
     }
+    
+    private int getFirstAvailableShowtime(int filmId) {
+        String query = "SELECT id FROM suat_chieu WHERE phim_id = ? AND ve_con_lai > 0 ORDER BY ngay_khoi_chieu LIMIT 1";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setInt(1, filmId);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                return rs.getInt("id");
+            }
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Lỗi khi lấy suất chiếu: " + e.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
+        }
+        return -1;
+    }
+
 
     // Hàm hỗ trợ tạo JLabel với kiểu dáng đẹp hơn
     private JLabel createStyledLabel(String text) {
